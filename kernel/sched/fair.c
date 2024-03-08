@@ -3716,6 +3716,11 @@ static inline unsigned long cfs_rq_load_avg(struct cfs_rq *cfs_rq)
 
 static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf);
 
+static inline unsigned long task_util(struct task_struct *p)
+{
+	return READ_ONCE(p->se.avg.util_avg);
+}
+
 static inline unsigned long _task_util_est(struct task_struct *p)
 {
 	struct util_est ue = READ_ONCE(p->se.avg.util_est);
@@ -7888,18 +7893,18 @@ idle:
 	if (rf) {
 		new_tasks = sched_balance_newidle(rq, rf);
 
-		/*
-		 * Because sched_balance_newidle() releases (and re-acquires)
-		 * rq->lock, it is possible for any higher priority task to
-		 * appear. In that case we must re-start the pick_next_entity()
-		 * loop.
-		 */
-		if (new_tasks < 0)
-			return RETRY_TASK;
+	new_tasks = sched_balance_newidle(rq, rf);
 
-		if (new_tasks > 0)
-			goto again;
-	}
+	/*
+	 * Because sched_balance_newidle() releases (and re-acquires) rq->lock, it is
+	 * possible for any higher priority task to appear. In that case we
+	 * must re-start the pick_next_entity() loop.
+	 */
+	if (new_tasks < 0)
+		return RETRY_TASK;
+
+	if (new_tasks > 0)
+		goto again;
 
 	/*
 	 * rq is about to be idle, check if we need to update the
@@ -11510,7 +11515,7 @@ static inline bool silver_has_big_tasks(void)
 #endif
 
 /*
- * newidle_balance is called by schedule() if this_cpu is about to become
+ * sched_balance_newidle is called by schedule() if this_cpu is about to become
  * idle. Attempts to pull tasks from other CPUs.
  */
 static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)

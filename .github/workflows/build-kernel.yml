@@ -1,0 +1,92 @@
+name: Build Android Kernel (Stock)
+
+on:
+  workflow_dispatch:
+    inputs:
+      localversion:
+        description: 'LOCALVERSION suffix — leave blank for defconfig default, or set to match `uname -r` exactly (e.g. -qgki-g1bdc6f8e81f0) if you need vermagic to match your current running kernel'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+          bc bison build-essential flex git curl \
+          libssl-dev libelf-dev libncurses-dev \
+          python3 unzip zip cpio
+
+      - name: Clone Proton Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+      - name: Clone AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+
+      - name: Build Kernel 5.4 (Stock, unmodified)
+        run: |
+          export PATH=$PWD/clang/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+
+          LOCALVERSION_INPUT="${{ github.event.inputs.localversion }}"
+
+          MAKE_FLAGS=(
+            ARCH=arm64
+            O=out
+            CC=clang
+            LLVM=1
+            LLVM_IAS=1
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          )
+          if [ -n "$LOCALVERSION_INPUT" ]; then
+            MAKE_FLAGS+=(LOCALVERSION="$LOCALVERSION_INPUT")
+          fi
+
+          mkdir -p out
+
+          # Load the stock defconfig as-is — no config overrides
+          make "${MAKE_FLAGS[@]}" vendor/holi-qgki_defconfig
+
+          # Sync in case defconfig pulls in dependent options
+          make "${MAKE_FLAGS[@]}" olddefconfig
+
+          # Build Image + .ko modules, stock config, no bypass flags
+          make -j$(nproc) "${MAKE_FLAGS[@]}" all
+
+      - name: Prepare AnyKernel3 (Physical DLKM Injection)
+        run: |
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's/is_slot_device=0/is_slot_device=1/g' AnyKernel3/anykernel.sh
+          sed -i 's/do.modules=0/do.modules=1/g' AnyKernel3/anykernel.sh
+          sed -i 's/do.systemless=1/do.systemless=0/g' AnyKernel3/anykernel.sh
+          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
+
+          cp out/arch/arm64/boot/Image AnyKernel3/
+
+          mkdir -p AnyKernel3/modules/vendor_dlkm/lib/modules
+          find out -name "*.ko" -exec cp {} AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
+
+          # Only strip debug symbols if the stock config actually left them in —
+          # harmless no-op otherwise
+          find AnyKernel3/modules/ -name "*.ko" -exec aarch64-linux-gnu-strip --strip-debug {} \; 2>/dev/null || true
+
+          cd AnyKernel3
+          zip -r9 ../Cyber-Stock-5.4.zip *
+
+      - name: Upload Flashable Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cyber-Kernel-Stock
+          path: ./Cyber-Stock-5.4.zip
+          

@@ -128,6 +128,12 @@ quirks() {
 		sed -i 's/const struct sde_pingpong_cfg \*pp_cfg;/const struct sde_pingpong_cfg *pp_cfg = NULL;/' "${f}"
 		echo -e "\e[1;32m[✓] Patched sde_rm.c: initialized 'pp_cfg' (Werror fix for newer clang).\e[0m"
 	fi
+
+	f="${KDIR}/drivers/hwtracing/coresight/coresight-byte-cntr.c"
+	if [ -f "${f}" ] && grep -q '^	char \*bufp;$' "${f}"; then
+		sed -i 's/^\tchar \*bufp;$/\tchar *bufp = NULL;/' "${f}"
+		echo -e "\e[1;32m[✓] Patched coresight-byte-cntr.c: initialized 'bufp' (Werror fix for newer clang).\e[0m"
+	fi
 }
 
 rgn() {
